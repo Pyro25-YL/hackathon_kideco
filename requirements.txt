@@ -3,3 +3,6 @@ xgboost
 shap
 pandas
 numpy
+matplotlib
+scikit-learn
+graphviz
