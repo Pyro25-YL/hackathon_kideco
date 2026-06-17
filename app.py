@@ -53,7 +53,7 @@ except:
 st.sidebar.header("🎛️ Simulator Sensor Jalur Tambang")
 st.sidebar.write("Sesuaikan telemetri sensor untuk memicu model AI:")
 
-# --- Kelompok Sensor Lingkungan & Operasional ---
+# --- Kelompok Sensor Lingkungan & Operasional Real-Time ---
 st.sidebar.subheader("🌡️ Kondisi Real-Time Detik Ini")
 sim_suhu = st.sidebar.slider("Sensor Suhu Udara (°C)", -10.0, 42.0, 31.0)
 sim_pres = st.sidebar.slider("Sensor Tekanan Udara Area Pit (hPa)", 990.0, 1040.0, 1011.0)
@@ -64,10 +64,20 @@ sim_truk = st.sidebar.slider("Sensor Kepadatan Dump Truck (Unit/Jam)", 100, 2000
 sim_blast = st.sidebar.slider("Sensor Aktivitas Blasting (Ppm)", 0, 150, 101)
 
 st.sidebar.write("---")
-# --- 🔥 KUNCI INTERAKTIF DEMO: SLIDER HISTORIS KONDISI DEBU SEBELUMNYA ---
-st.sidebar.subheader("⏱️ Konteks Waktu (Lag Simulator)")
-st.sidebar.info("Gunakan slider di bawah ini untuk mengatur kondisi akumulasi debu pada jam-jam sebelumnya.")
-sim_lag_1 = st.sidebar.slider("Kepadatan Debu 1 Jam Lalu (µg/m³)", 0.0, 600.0, 150.0) # Kita set default 150 agar langsung memicu status ekstrem jika truk padat
+# --- 🔥 TOMBOL/SLIDER DINAMIS UNTUK TREN HISTORIS KONDISI OPERASIONAL ---
+st.sidebar.subheader("⏱️ Konteks Waktu & Tren Historis")
+st.sidebar.info("Atur kondisi historis di bawah ini untuk menghitung variabel Tren 3 Jam secara dinamis.")
+
+# Kontrol Akumulasi Debu
+sim_lag_1 = st.sidebar.slider("Kepadatan Debu 1 Jam Lalu (µg/m³)", 0.0, 600.0, 150.0)
+
+# Kontrol Historis Suhu (Untuk kalkulasi Tren_Suhu_3Jam)
+hist_suhu_1 = st.sidebar.slider("Suhu Udara 1 Jam Lalu (°C)", -10.0, 42.0, 30.5)
+hist_suhu_2 = st.sidebar.slider("Suhu Udara 2 Jam Lalu (°C)", -10.0, 42.0, 30.0)
+
+# Kontrol Historis Aktivitas Truk (Untuk kalkulasi Tren_Truk_3Jam)
+hist_truk_1 = st.sidebar.slider("Kepadatan Truk 1 Jam Lalu (Unit)", 100, 2000, 1400)
+hist_truk_2 = st.sidebar.slider("Kepadatan Truk 2 Jam Lalu (Unit)", 100, 2000, 1335)
 
 st.sidebar.write("---")
 jalankan_ai = st.sidebar.button("🚀 Kirim Data & Evaluasi Sistem AI", use_container_width=True)
@@ -92,13 +102,15 @@ tab1, tab2 = st.tabs(["🖥️ Live Dashboard & Simulator", "⚙️ Proses Inter
 # ==================== TAB 1: DASHBOARD SIMULATOR ====================
 with tab1:
     if jalankan_ai:
-        # --- STRATEGI DEMO DINAMIS ---
-        # Debu 2 jam lalu dikalkulasikan proporsional terhadap input slider Debu 1 Jam Lalu agar logis
+        # --- STRATEGI KALKULASI FITUR TEMPORAL YANG SEPENUHNYA DINAMIS ---
+        # 1. Debu 2 jam lalu dibuat proporsional terhadap input manual Debu 1 jam lalu
         sim_lag_2 = sim_lag_1 * 0.95 
         
-        # Menghitung tren rata-rata bergerak 3 jam secara logis dari input slider saat ini
-        sim_tren_suhu = (sim_suhu + (sim_suhu - 0.5) + (sim_suhu - 1.0)) / 3
-        sim_tren_truk = (sim_truk + (sim_truk - 100) + (sim_truk - 200)) / 3
+        # 2. Tren Suhu 3 Jam Terakhir dihitung secara murni dinamis berdasarkan input real-time & historis sidebar
+        sim_tren_suhu = (sim_suhu + hist_suhu_1 + hist_suhu_2) / 3
+        
+        # 3. Tren Kepadatan Truk 3 Jam Terakhir dihitung secara murni dinamis berdasarkan input real-time & historis sidebar
+        sim_tren_truk = (sim_truk + hist_truk_1 + hist_truk_2) / 3
         
         # Menyusun 11 input sesuai struktur urutan kolom fitur model Super-Advanced
         input_list = [
@@ -127,19 +139,34 @@ with tab1:
             if pred_pm25 >= 100: st.warning("SMART SPRINKLER: 🔥 AUTOMATIC OPEN")
             else: st.info("SMART SPRINKLER: 🔒 CLOSE (HEMAT AIR)")
                 
+        # --- 📈 FIX TOTAL GRAFIK KOSONG: GENERATOR TREN DINAMIS KRONOLOGIS ---
         st.write("---")
         st.write("### 📈 Grafik Live Tren Kepadatan Debu (24 Jam Terakhir)")
         
-        array_tren = df_historis['PM2.5'].values.copy()
-        array_tren[-2] = sim_lag_1  # Menyuntikkan nilai historis pilihan Anda ke grafik line chart
-        array_tren[-1] = pred_pm25   # Menyuntikkan hasil prediksi saat ini ke ujung grafik
+        # 1. Membuat kurva fluktuasi historis harian dari jam 00:00 - 22:00
+        np.random.seed(42)
+        base_trend = np.linspace(sim_lag_1 * 0.85, sim_lag_1, 23)
+        noise = np.random.normal(0, 7, 23)
+        array_tren_24jam = np.clip(base_trend + noise, 15, 600)
         
+        # Suntikkan hasil prediksi realtime model ke ujung grafik (Jam ke-24 / Jam Sekarang)
+        array_tren_24jam = np.append(array_tren_24jam, pred_pm25)
+        
+        # 2. PERBAIKAN STRUKTUR DATA: Gunakan DataFrame murni tanpa set_index string agar Streamlit membaca polanya
         df_chart = pd.DataFrame({
-            'Waktu Operasional (Jam)': [f"Pukul {i:02d}:00" for i in range(24)],
-            'Ambang Batas PM2.5 (µg/m³)': array_tren
-        }).set_index('Waktu Operasional (Jam)')
+            'Jam Operasional': list(range(24)),
+            'Kepadatan Debu PM2.5 (µg/m³)': array_tren_24jam
+        })
         
-        st.line_chart(df_chart, height=220)
+        # 3. Tampilkan menggunakan st.line_chart dengan mendefinisikan x dan y secara eksplisit
+        st.line_chart(
+            data=df_chart, 
+            x='Jam Operasional', 
+            y='Kepadatan Debu PM2.5 (µg/m³)', 
+            height=280, 
+            use_container_width=True
+        )
+        st.caption("ℹ️ *Sumbu X menunjukkan urutan waktu 24 jam terakhir (0 = Pukul 00:00 hingga 23 = Jam Sekarang).*")
         st.write("---")
         
         layout_kiri, layout_kanan = st.columns([1.2, 1])
@@ -190,7 +217,7 @@ with tab2:
         
         nilai_sensor_tampil = [
             str(sim_suhu), str(sim_pres), str(sim_dewp), str(sim_wspm), str(sim_rain), str(sim_truk), str(sim_blast),
-            f"{sim_lag_1:.1f} (Manual Slider)", f"{sim_lag_2:.1f} (Auto dari Slider)", f"{sim_tren_suhu:.1f} (Auto)", f"{sim_tren_truk:.1f} (Auto)"
+            f"{sim_lag_1:.1f} (Manual Slider)", f"{sim_lag_2:.1f} (Dinamis)", f"{sim_tren_suhu:.1f} (Dinamis Berbasis Slider)", f"{sim_tren_truk:.1f} (Dinamis Berbasis Slider)"
         ]
         
         df_audit = pd.DataFrame({
